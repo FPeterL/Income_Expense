@@ -1,0 +1,228 @@
+<!-- Fehér Péter 2024.11.xx NoSql vizsga feladat -->
+<!DOCTYPE html>
+<html lang="hu">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bevétel-Kiadás Kezelő</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+    <h1>Bevétel-Kiadás Kezelő!</h1>
+    <p>Itt kezelheted a bevételeidet és kiadásaidat.</p>
+    <p>A '+' jellel a bevételeket, a '-' jellel a kiadásokat tudod rögzíteni!</p>
+    <div class="input-container">
+        <div class="input-group">
+            <label for="tetel-leiras">Tétel leírás</label>
+            <input type="text" id="tetel-leiras" placeholder="Írd be a tétel leírását">
+        </div>
+        <div class="input-group">
+            <label for="osszeg">Összeg</label>
+            <input type="number" id="osszeg" placeholder="Írd be az összeget (Ft)" min="0" oninput="validateInput(this)">
+            <button type="button" onclick="addIncome()">+</button>
+            <button type="button" onclick="addExpense()">-</button>
+        </div>
+    </div>
+    <table>
+    <!-- Diagram elhelyezése -->
+    <canvas id="incomeExpenseChart" width="400" height="200"></canvas>
+        <thead>
+            <tr>
+                <th>Hónap</th>
+                <th>Év</th>
+                <th></th>
+                <th>Total</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td>
+                    <select id="month-select">
+                        <option value="0">Január</option>
+                        <option value="1">Február</option>
+                        <option value="2">Március</option>
+                        <option value="3">Április</option>
+                        <option value="4">Május</option>
+                        <option value="5">Június</option>
+                        <option value="6">Július</option>
+                        <option value="7">Augusztus</option>
+                        <option value="8">Szeptember</option>
+                        <option value="9">Október</option>
+                        <option value="10">November</option>
+                        <option value="11">December</option>
+                    </select>
+                </td>
+                <td>
+                    <select id="year-select">
+                        <option value="2023">2023</option>
+                        <option value="2024">2024</option>
+                        <option value="2025">2025</option>
+                        <option value="2026">2026</option>
+                    </select>
+                </td>
+                <td><button type="button" onclick="filterTransactions()">Szűrés</button></td>
+                <td rowspan="12" class="total">0 Ft</td>
+            </tr>
+        </tbody>
+    </table>
+    <div id="toggle-buttons">
+        <button id="show-table" type="button" onclick="toggleTable(true)">+</button>
+        <button id="hide-table" type="button" onclick="toggleTable(false)">-</button>
+    </div>
+    <table id="data-table" style="display:none;">
+        <thead>
+            <tr>
+                <th class="income-column">Dátum (Bevétel)</th>
+                <th class="income-column">Bevétel</th>
+                <th class="income-column">Összeg (Ft)</th>
+                <th class="expense-column">Dátum (Kiadás)</th>
+                <th class="expense-column">Kiadás</th>
+                <th class="expense-column">Összeg (Ft)</th>
+            </tr>
+        </thead>
+        <tbody>
+            <!-- Adatok itt jelennek meg -->
+        </tbody>
+    </table>
+
+    <script>
+        window.onload = () => {
+            const today = new Date();
+            document.getElementById("year-select").value = today.getFullYear();
+            document.getElementById("month-select").value = today.getMonth();
+            filterTransactions(); // Szűrés automatikusan induláskor
+            toggleTable(false);
+        };
+
+        function toggleTable(show) {
+            const dataTable = document.getElementById("data-table");
+            dataTable.style.display = show ? "table" : "none";
+        }
+
+        // Tranzakciók betöltése szűréssel
+        async function loadTransactions(month = null, year = null) {
+            const transactions = await window.api.getTransactions(month, year);
+            const tbody = document.querySelector('#data-table tbody');
+            tbody.innerHTML = ''; // Töröljük a táblázat tartalmát
+
+            const maxLength = Math.max(transactions.incomes.length, transactions.expenses.length);
+
+            for (let i = 0; i < maxLength; i++) {
+                const newRow = document.createElement('tr');
+                newRow.innerHTML = `
+                    <td>${transactions.incomes[i] ? new Date(transactions.incomes[i].date).toLocaleDateString() : ''}</td>
+                    <td>${transactions.incomes[i] ? transactions.incomes[i].title : ''}</td>
+                    <td>${transactions.incomes[i] ? transactions.incomes[i].income : ''}</td>
+                    <td>${transactions.expenses[i] ? new Date(transactions.expenses[i].date).toLocaleDateString() : ''}</td>
+                    <td>${transactions.expenses[i] ? transactions.expenses[i].title : ''}</td>
+                    <td>${transactions.expenses[i] ? transactions.expenses[i].expense : ''}</td>
+                `;
+                tbody.appendChild(newRow);
+            }
+        }
+
+        // Szűrési művelet
+        async function filterTransactions() {
+            const selectedMonth = parseInt(document.getElementById("month-select").value);
+            const selectedYear = parseInt(document.getElementById("year-select").value);
+
+            const transactions = await window.api.getTransactions({ month: selectedMonth, year: selectedYear });
+            displayTransactions(transactions);
+
+            // Összegzés a totalhoz
+            const totalIncome = transactions.incomes.reduce((acc, income) => acc + income.income, 0);
+            const totalExpense = transactions.expenses.reduce((acc, expense) => acc + expense.expense, 0);
+            const total = totalIncome - totalExpense;
+
+            // Total mező frissítése
+            document.querySelector('.total').textContent = `${total} Ft`;
+
+            // Diagram frissítése
+            initializeChart(totalIncome, totalExpense);
+        }
+
+        async function addIncome() {
+            const title = document.getElementById("tetel-leiras").value;
+            const amount = parseFloat(document.getElementById("osszeg").value);
+
+            // Ellenőrizzük, hogy az összeg nem negatív
+            if (amount < 0) {
+                alert("Az összeg nem lehet negatív!");
+                return;  // Kilépünk a funkcióból, ha az összeg negatív
+            }
+
+            await window.api.handleAddIncome(title, amount);
+            alert("Bevétel hozzáadva!");
+            filterTransactions();  // Frissítjük a tranzakciókat
+            document.getElementById("tetel-leiras").value = '';
+            document.getElementById("osszeg").value = '';
+}
+
+        async function addExpense() {
+            const title = document.getElementById("tetel-leiras").value;
+            const amount = parseFloat(document.getElementById("osszeg").value);
+
+            // Ellenőrizzük, hogy az összeg nem negatív
+            if (amount < 0) {
+                alert("Az összeg nem lehet negatív!");
+                return;  // Kilépünk a funkcióból, ha az összeg negatív
+            }
+
+            await window.api.handleAddExpense(title, amount);
+            alert("Kiadás hozzáadva!");
+            filterTransactions();  // Frissítjük a tranzakciókat
+            document.getElementById("tetel-leiras").value = '';
+            document.getElementById("osszeg").value = '';
+        }
+
+        function displayTransactions(transactions) {
+            const tbody = document.querySelector('#data-table tbody');
+            tbody.innerHTML = '';  // A táblázat törlése
+
+            const maxLength = Math.max(transactions.incomes.length, transactions.expenses.length);
+            for (let i = 0; i < maxLength; i++) {
+                const newRow = document.createElement('tr');
+                newRow.innerHTML = `
+                    <td>${transactions.incomes[i] ? new Date(transactions.incomes[i].date).toLocaleDateString() : ''}</td>
+                    <td>${transactions.incomes[i] ? transactions.incomes[i].title : ''}</td>
+                    <td>${transactions.incomes[i] ? transactions.incomes[i].income : ''}</td>
+                    <td>${transactions.expenses[i] ? new Date(transactions.expenses[i].date).toLocaleDateString() : ''}</td>
+                    <td>${transactions.expenses[i] ? transactions.expenses[i].title : ''}</td>
+                    <td>${transactions.expenses[i] ? transactions.expenses[i].expense : ''}</td>
+                `;
+                tbody.appendChild(newRow);
+            }
+        }
+
+        let incomeExpenseChart;
+
+        function initializeChart(income, expense) {
+            const ctx = document.getElementById('incomeExpenseChart').getContext('2d');
+            if (incomeExpenseChart) {
+                incomeExpenseChart.destroy(); // Ha létezik korábbi diagram, töröljük, hogy újra létrehozzuk
+            }
+            incomeExpenseChart = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: ['Bevétel', 'Kiadás'],
+                    datasets: [{
+                        label: 'Összeg (Ft)',
+                        data: [income, expense],
+                        backgroundColor: ['rgba(75, 192, 192, 0.6)', 'rgba(255, 99, 132, 0.6)'],
+                        borderColor: ['rgba(75, 192, 192, 1)', 'rgba(255, 99, 132, 1)'],
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    scales: {
+                        y: {
+                            beginAtZero: true
+                        }
+                    }
+                }
+            });
+        }
+    </script>
+</body>
+</html>
